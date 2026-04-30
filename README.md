@@ -144,7 +144,7 @@ You can use this file to test CipherTrail without creating your own input file f
 ├── LICENSE
 ├── .gitignore
 └── examples/
-    └── sample_input.`txt
+    └── sample_inpt.``
 
 ## Skills Demonstrated
 
