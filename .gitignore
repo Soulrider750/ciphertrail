@@ -1,0 +1,21 @@
+# macOS system files
+.DS_Store
+
+# Ciphertrail generated files
+encoder_results/
+ciphertrail_results/
+*_payload.txt
+*_key.txt
+*_decoded.txt
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Logs
+*.log
+
+# Environment files
+.env
