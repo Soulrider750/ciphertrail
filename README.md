@@ -6,7 +6,7 @@ CipherTrail is an educational Bash-based encoder and decoder tool used for cyber
 
 This project was created as a cybersecurity learning project to practice Bash scripting, command-line tool design, file handling, input validation, encoding/decoding workflow, OpenSSL usage, password-protected key files, and SHA-256 integrity checking.
 
-CipherTrail is not intended to replace modern encryption tools or production-grade cryptographic software. Instead, it is a portfolio project meant to demonstrate scripting ability, security awareness, and understanding of how encoding, transformation logic, password protection, and integrity verification can work together in a comman-line workflow.
+CipherTrail is not intended to replace modern encryption tools or production-grade cryptographic software. Instead, it is a portfolio project meant to demonstrate scripting ability, security awareness, and understanding of how encoding, transformation logic, password protection, and integrity verification can work together in a command-line workflow.
 
 ## Features
 
@@ -157,7 +157,7 @@ This project demonstrates:
 - File input and output handling
 - User input validation
 - Encoding and decoding logic
-- OpenSSL comman-line usage
+- OpenSSL command-line usage
 - Password-protected key-file handling
 - SHA-256 integrity checking
 - macOS/Linux compatibility considerations
