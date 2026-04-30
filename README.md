@@ -138,13 +138,15 @@ You can use this file to test CipherTrail without creating your own input file f
 
 ## Project Structure
 
-`ciphertrail/
+```bash
+ciphertrail/
 ├── ciphertrail.sh
 ├── README.md
 ├── LICENSE
 ├── .gitignore
 └── examples/
-    └── sample_inpt.``
+    └── sample_input.txt
+```
 
 ## Skills Demonstrated
 
