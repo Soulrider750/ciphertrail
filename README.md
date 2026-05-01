@@ -37,7 +37,7 @@ The key file is then protected with a user-created password. During decoding, Ci
 
 ## Requirements
 
-CipherTrail requires the followng tools:
+CipherTrail requires the following tools:
 
 - Bash
 - OpenSSL
@@ -106,7 +106,7 @@ job_YYYYMMDD_HHMMSS_payload.txt
 job_YYYYMMDD_HHMMSS_key.txt
 ```
 
-The payload file ontains the encoded input. The key file contains the protected decoding instructions.
+The payload file contains the encoded input. The key file contains the protected decoding instructions.
 
 ## Decoding example
 
@@ -119,7 +119,7 @@ Run:
 Choose:
 
 ```bash
-e
+d
 ```
 
 Select the encoded payload input, then provide the matching key file and password.
