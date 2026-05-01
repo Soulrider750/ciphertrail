@@ -2,6 +2,10 @@
 
 CipherTrail is an educational Bash-based encoder and decoder tool used for cybersecurity scripting practice. It allows a user to encode direct input or file input through layered Base64 encoding, randomized string rotation, and string reversal operations. The tool also creates a paired protected key file that stores the decoding steps needed to reverse the process.
 
+## Workflow Diagram
+
+![CipherTrail Workflow Diagram](assets/CyberTrail_Workflow.png)
+
 ## Purpose
 
 This project was created as a cybersecurity learning project to practice Bash scripting, command-line tool design, file handling, input validation, encoding/decoding workflow, OpenSSL usage, password-protected key files, and SHA-256 integrity checking.
