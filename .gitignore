@@ -19,3 +19,6 @@ ciphertrail_results/
 
 # Environment files
 .env
+
+#Backup files
+backups/*

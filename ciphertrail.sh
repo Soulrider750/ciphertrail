@@ -1,8 +1,8 @@
 #!/bin/bash
 # CipherTrail
-# Educational Bash encoder/decoder tool with protected key-file handling.
-# Author: Andrew Edwards
-# Purpose: Cybersecrity scripting and encoding/decoding practice.
+# Educational Bash encoder/decoder tool with protected key-file handling
+# Author: Andrew Edwards 
+# Purpose: Cybersecurity scripting and encoding/decoding practice lab for students and professionals. Demonstrates encoding, obfuscation, and key file protection concepts.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -10,12 +10,461 @@ IFS=$'\n\t'
 RESULTS_DIR="$HOME/encoder_results"
 mkdir -p "$RESULTS_DIR"
 
+# Create a unique job name based on timestamp to avoid overwriting results
 timestamp=$(date +"%Y%m%d_%H%M%S")
 job_name="job_${timestamp}"
+
+# Version information and script name for help and logging
+VERSION="1.1.0"
+SCRIPT_NAME="$(basename "$0")"
+
+# Default behavior flags (can be overridden by CLI options)
+
+INTERACTIVE=true
+VERBOSE=false
+TRACE=false
+QUIET=false
+SELF_TEST=false
+DRY_RUN=false
+
+# CLI-controlled values
+
+mode=""
+input_mode=""
+input_text=""
+infile=""
+output_file=""
+key_file=""
+iterations=""
+max_rotation=""
+key_password=""
+password_env_var=""
+show_output="n"
+
+# Default settings for encoding parameters
+
+DEFAULT_ITERATIONS=3
+DEFAULT_MAX_ROTATION=8
+MAX_ITERATIONS=25
 
 # -----------------
 # Helper functions
 # -----------------
+
+# Standard output and error helpers with verbosity control
+
+die() {
+	echo "ERROR: $*" >&2
+	exit 1
+}
+
+log() {
+	if [[ "$QUIET" != true ]]; then
+		echo "$*"
+	fi
+}
+
+verbose_log() {
+	if [[ "$VERBOSE" == true || "$TRACE" == true ]]; then
+		echo "[info] $*" >&2
+	fi
+}
+
+trace_log() {
+	if [[ "$TRACE" == true ]]; then
+		echo "[trace] $*" >&2
+	fi
+}
+
+# Help menu and educational explanation
+
+print_usage() {
+  cat <<EOF
+CipherTrail v$VERSION
+
+Educational command-line encoding and transformation lab.
+
+Usage:
+	$SCRIPT_NAME
+	$SCRIPT_NAME encode [options]
+	$SCRIPT_NAME decode [options]
+	$SCRIPT_NAME explain
+	$SCRIPT_NAME clean [options]
+	$SCRIPT_NAME --self-test
+	$SCRIPT_NAME --help
+	$SCRIPT_NAME --version
+
+Encode options:
+    -i, --input FILE                Read input from a file
+        --text TEXT                 Use direct text input
+    -o, --output FILE               Payload output file
+    -k, --key FILE                  Key output file
+    -n, --iterations NUM            Number of encoding layers, max $MAX_ITERATIONS
+    -r, --max-rotations NUM         Maximum rotation amount
+        --passwords-env VAR         Read key password from environment variable
+
+Decode options:
+    -i, --input FILE                Encoded payload file
+        --text TEXT                 Encoded payload text
+    -k, --key FILE                  Protected key file
+    -o, --output FILE               Decoded output file
+        --show                      Display decoded output in terminal
+        --password-env VAR.         Read key password from environment variable
+	
+Output options:
+        --verbose                   Show high-level process messages
+        --trace                     Show each transformation step
+        --quiet                     Suppress normal output
+
+Educational options:
+        explain                     Explain encoding, obfuscation, and key files
+        --self-test                 Run a built-in encode/decode verification test
+
+Examples:
+	$SCRIPT_NAME encode --input examples/sample_input.txt --iterations 5 --max-rotation 8 --verbose
+	$SCRIPT_NAME decode --input payload.txt --key key.txt --show
+	CIPHERTRAIL_PASSWORD='testpass' $SCRIPT_NAME encode --input message.txt --password-env CIPHERTRAIL_PASSWORD
+EOF
+}
+
+# Explain mode
+
+print_explain() {
+  cat <<'EOF'
+CipherTrail Educational Explanation
+
+CipherTrail demonstrates the difference between encoding, obfuscation, and encryption.
+
+1. Base64 encoding
+   Base64 changes data into a text-safe format. It is reversible and not encryption.
+
+2. String rotation
+   Rotation moves characters from one side of the string to the other. It is reversible obfuscation.
+
+3. String reversal
+   Reversal flips the order of characters. It is also reversible obfuscation.
+
+4. Protected key file
+   CipherTrail records the operations needed to reverse the payload. That operation recipe is protected with a password using OpenSSL.
+
+5. Integrity checking
+   CipherTrail uses SHA-256 to verify that the decrypted key instructions have not been changed.
+
+Important:
+CipherTrail is an educational security tool. It should not be used as production encryption.
+EOF
+}
+
+# Command-Line argument parsing with support for interactive mode, direct input, file input, and various options
+
+parse_args() {
+	if [[ "$#" -eq 0 ]]; then
+		INTERACTIVE=true
+		return 0
+	fi
+
+	INTERACTIVE=false
+
+	case "$1" in
+		encode|e)
+			mode="e"
+			shift
+			;;
+		decode|d)
+			mode="d"
+			shift
+			;;
+		explain)
+			print_explain
+			exit 0
+			;;
+		clean)
+	   		mode="clean"
+			shift
+			;;
+		--self-test)
+			SELF_TEST=true
+			shift
+			;;
+		-h|--help)
+			print_usage
+			exit 0
+			;;
+		--version)
+			echo "CipherTrail v$VERSION"
+			exit 0
+			;;
+		*)
+			die "Unknown command: $1. Use --help for usage."
+			;;
+	esac
+
+	while [[ "$#" -gt 0 ]]; do
+		case "$1" in
+			-i|--input)
+				[[ "${2:-}" ]] || die "Missing value for $1"
+				infile="$2"
+				input_mode="f"
+				shift 2
+				;;
+			--text)
+				[[ "${2:-}" ]] || die "Missing value for --text"
+				input_text="$2"
+				input_mode="i"
+				shift 2
+				;;
+			-o|--output)
+				[[ "${2:-}" ]] || die "Missing value for $1"
+				output_file="$2"
+				shift 2
+				;;
+			-k|--key)
+				[[ "${2:-}" ]] || die "Missing value for $1"
+				key_file="$2"
+				shift 2
+				;;
+			-n|--iterations)
+				[[ "${2:-}" ]] || die "Missing value for $1"
+				iterations="$2"
+				shift 2
+				;;
+			-r|--max-rotation)
+				[[ "${2:-}" ]] || die "Missing value for $1"
+				max_rotation="$2"
+				shift 2
+				;;
+			--password-env)
+				[[ "${2:-}" ]] || die "Missing value for --password-env"
+				password_env_var="$2"
+				shift 2
+				;;
+			--show)
+				show_output="y"
+				shift
+				;;
+			--verbose)
+				VERBOSE=true
+				shift
+				;;
+			--trace)
+				TRACE=true
+				VERBOSE=true
+				shift
+				;;
+			--quiet)
+				QUIET=true
+				shift
+				;;
+			*)
+				die "Unknown option: $1. Use --help for usage."
+				;;
+		esac
+	done
+}
+
+# Password handling with optional environment variable support for non-interactive use in scripts or CI environments
+
+get_password_from_env() {
+	if [[ -n "$password_env_var" ]]; then
+		local value="${!password_env_var-}"
+		[[ -n "$value" ]] || die "Environment variable '$password_env_var' is empty or not set."
+		printf "%s" "$value"
+		return 0
+	fi
+
+	return 1
+}
+
+prompt_for_new_password() {
+	local password=""
+	local confirm=""
+
+	if password=$(get_password_from_env); then
+	printf "%s" "$password"
+	return 0
+	fi
+
+	read -r -s -p "Create a password to protect the key file: " password
+	echo 
+	read -r -s -p $'\nConfirm the password: ' confirm
+	echo
+
+	[[ -n "$password" ]] || die "Password cannot be empty!"
+	[[ "$password" == "$confirm" ]] || die "Passwords do not match!"
+
+	printf "%s" "$password"
+}
+
+prompt_for_existing_password() {
+	local password=""
+
+	if password=$(get_password_from_env); then
+		printf "%s" "$password"
+		return 0
+	fi
+
+	read -r -s -p $'Enter the password for the key file: \n' password
+	echo
+
+	[[ -n "$password" ]] || die "Password cannot be empty!"
+
+	printf "%s" "$password"
+}
+
+# Add input loading with support for direct text input or file input, and path resolution for files in the results directory or absolute paths
+
+load_input_value() {
+	if [[ "$input_mode" == "i" ]]; then
+		if [[ -z "$input_text" ]]; then
+			read -r -p "Hello, please enter your string: " input_text
+		fi
+
+		[[ -n "$input_text" ]] || die "Input cannot be empty."
+		printf "%s" "$input_text"
+		return 0
+	fi
+
+	if [[ "$input_mode" == "f" ]]; then
+		if [[ -z "$infile" ]]; then
+			read -r -p "Enter the input file name: " infile
+		fi
+
+		infile=$(resolve_path "$infile")
+		[[ -n "$infile" && -f "$infile" ]] || die "Input file not found."
+
+		local data
+		data=$(<"$infile")
+		[[ -n "$data" ]] || die "Input file is empty."
+
+		printf "%s" "$data"
+		return 0
+	fi
+
+	read -r -p "Would you like to use direct input or read from a file? (i/f): " input_mode
+
+	case "$input_mode" in
+		i|f)
+			load_input_value
+			;;
+		*)
+			die "Invalid input mode. Use 'i' for direct input, or 'f' for file."
+			;;
+	esac
+}
+
+# Validation helpers for numeric parameters with range checks
+
+validate_positive_integer() {
+	local value="$1"
+	local label="$2"
+
+	[[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$label must be a positive integer."
+}
+
+validate_iterations() {
+	validate_positive_integer "$iterations" "Iterations"
+
+	if [[ "$iterations" -gt "$MAX_ITERATIONS" ]]; then
+		die "Max iterations is $MAX_ITERATIONS."
+	fi
+}
+
+validate_max_rotation() {
+	validate_positive_integer "$max_rotation" "Max rotation"
+}
+
+# Self-test function to verify that encoding and decoding processes work correctly with a known input and transformations, using temporary files for isolation
+
+run_self_test() {
+	log "Running CipherTrail self-test..."
+
+	local original="CipherTrail self-test message"
+	local password="CipherTrailSelfTestPassword123!"
+	local temp_dir
+	temp_dir=$(mktemp -d)
+
+	local test_payload="$temp_dir/payload.txt"
+	local test_key="$temp_dir/key.txt"
+	local test_decoded="$temp_dir/decoded.txt"
+
+	local saved_results_dir="$RESULTS_DIR"
+	RESULTS_DIR="$temp_dir"
+
+	local var="$original"
+	local test_iterations=3
+	local test_max_rotation=5
+	local plain_key_data=""
+	local counter rotation strlen
+
+	plain_key_data+="# paired with $(basename "$test_payload")"$'\n'
+	plain_key_data+="# format: iteration|operation|amount"$'\n'
+
+	for ((counter=1; counter<=test_iterations; counter++)); do
+		var=$(encode_base64 "$var")
+
+		if (( counter % 2 ==1 )); then
+			strlen=${#var}
+			if [[ "$strlen" -le 1 ]]; then
+				rotation=0
+			else
+				rotation=$(( (RANDOM % test_max_rotation) + 1 ))
+				rotation=$(( rotation % strlen ))
+				[[ "$rotation" -eq 0 ]] && rotation=1
+			fi
+
+			var=$(rotate_left "$var" "$rotation")
+			plain_key_data+="${counter}|rotate|${rotation}"$'\n'
+		else
+			var=$(reverse_string "$var")
+			plain_key_data+="${counter}|reverse|0"$'\n'
+		fi
+	done
+
+	plain_key_data="${plain_key_data%$'\n'}"
+
+	printf "%s" "$var" > "$test_payload"
+	write_protected_keyfile "$plain_key_data" "$test_key" "$password"
+
+	local encoded_payload
+	encoded_payload=$(<"$test_payload")
+
+	local recovered_key_data
+	recovered_key_data=$(read_protected_keyfile "$test_key" "$password")
+
+	local key_lines=()
+	while IFS= read -r line; do
+		key_lines+=("$line")
+	done < <(printf "%s\n" "$recovered_key_data" | grep -E '^[0-9]+\|(rotate|reverse)\|[0-9]+$')
+
+	var="$encoded_payload"
+
+	local idx iteration operation amount decoded
+	for ((idx=${#key_lines[@]}-1; idx>=0; idx--)); do
+		IFS='|' read -r iteration operation amount <<< "${key_lines[idx]}"
+
+		if [[ "$operation" == "rotate" ]]; then
+			var=$(rotate_right "$var" "$amount")
+		elif [[ "$operation" == "reverse" ]]; then
+			var=$(reverse_string "$var")
+		else
+			die "Self-test failed: Invalid operation."
+		fi
+
+		decoded=$(decode_base64 "$var") || die "Self-test failed during Base64 decode."
+		var="$decoded"
+	done
+
+	printf "%s" "$var" > "$test_decoded"
+
+	if [[ "$var" == "$original" ]]; then
+		log "Self-test passed."
+	else
+		die "Self-test failed: Decoded output does not match original input."
+	fi
+
+	RESULTS_DIR="$saved_results_dir"
+	rm -rf "$temp_dir"
+}
 
 resolve_path() {
     local input="$1"
@@ -201,7 +650,8 @@ decrypt_with_password() {
 	printf "%s" "$output"
 }
 
-# Wrap plain key data into protected file format
+# Wrap plain key data into protected file format with hash and encrypted payload
+
 write_protected_keyfile() {
 		local plain_key_data="$1"
 		local key_file="$2"
@@ -274,61 +724,44 @@ read_protected_keyfile() {
 		printf "%s" "$decrypted_payload"
 }
 
-# --------------------
-# Check dependencies
-# --------------------
+# ---------------------------------------------------------------------------------------------
+# Check dependencies before proceeding with the main logic, and run self-test if requested
+# ---------------------------------------------------------------------------------------------
+
+parse_args "$@"
 
 check_dependencies || exit 1
 
-# -------------------------------------
-# Ask user whether to encode or decode
-# -------------------------------------
-
-read -r -p "Would you like to encode or decode? (e/d): " mode
-
-if [[ "$mode" != "e" && "$mode" != "d" ]]; then
-		echo "Invalid mode! Use 'e' for encode or 'd' for decode."
-		exit 1
+if [[ "$SELF_TEST" == true ]]; then
+	run_self_test
+	exit 0
 fi
 
-# -----------------------------------------------
-# Ask user whether to use direct input or a file
-# -----------------------------------------------
-
-read -r -p "Would you like to use direct input or read from a file? (i/f): " input_mode
-
-if [ "$input_mode" = "i" ]; then
-		read -r -p "Hello, please enter your string: " var
-        if [ -z "$var" ]; then
-                echo "Input cannot be empty!"
-                exit 1
-        fi
-elif [ "$input_mode" = "f" ]; then
-		read -r -p "Enter the input file name: " infile
-        infile=$(resolve_path "$infile")
-
-        if [ -z "$infile" ] || [ ! -f "$infile" ]; then
-                echo "Input file not found!"
-                exit 1
-        fi
-
-		var=$(<"$infile")
-
-        if [ -z "$var" ]; then
-                echo "Input file is empty!"
-                exit 1
-        fi 
-else
-		echo "Invalid input mode! use 'i' for direct input or 'f' for file."
-		exit 1
+if [[ -z "$mode" ]]; then
+	read -r -p "Would you like to encode or decode? (e/d): " mode
 fi
+
+if [[ "$mode" != "e" && "$mode" != "d" && "$mode" != "clean" ]]; then
+	die "Invalid mode! Use 'e' for encode, 'd' for decode, or --help for usage."
+fi
+
+if [[ "$mode" == "clean" ]]; then
+	log "Clean mode will be added in Version 1.3."
+	exit 0
+fi
+
+var=$(load_input_value)
 
 # -------------
 # Encode mode
 # -------------
 
 if [ "$mode" = "e" ]; then
-		read -r -p "How many times would you like this encoded? (MAX 25): " iterations
+		if [[ -z "$iterations" ]]; then
+			read -r -p "How many times would you like this encoded? (MAX $MAX_ITERATIONS): " iterations
+		fi
+
+		validate_iterations
 
 		if ! [[ "$iterations" =~ ^[1-9][0-9]*$ ]]; then
 				echo "Must be a positive integer from 1-25!"
@@ -340,30 +773,32 @@ if [ "$mode" = "e" ]; then
 				exit 1
 		fi
 
-		read -r -p "Enter maximum random rotation amount for odd iterations: " max_rotation
+		if [[ -z "$max_rotation" ]]; then
+			read -r -p "Enter maximum random rotation amount for odd iteration: " max_rotation
+		fi
+
+		validate_max_rotation
 
 		if ! [[ "$max_rotation" =~ ^[1-9][0-9]*$ ]]; then
 				echo "Max rotation must be a positive integer!"
 				exit 1
 		fi
 
-		read -r -s -p "Create a password to protect the key file: " key_password
-		echo
-		read -r -s -p "Confirm the password: " key_password_confirm
-		echo
+		key_password=$(prompt_for_new_password)
 
 		if [ -z "$key_password" ]; then
 				echo "Password cannot be empty!"
 				exit 1
 		fi
 
-		if [ "$key_password" != "$key_password_confirm" ]; then
-				echo "Passwords do not match!"
-				exit 1
+
+		if [[ -z "$output_file" ]]; then
+			output_file="$RESULTS_DIR/${job_name}_payload.txt"
 		fi
 
-		output_file="$RESULTS_DIR/${job_name}_payload.txt"
-		key_file="$RESULTS_DIR/${job_name}_key.txt"
+		if [[ -z "$key_file" ]]; then
+			key_file="$RESULTS_DIR/${job_name}_key.txt"
+		fi
 
         plain_key_data=""
         plain_key_data+="# paired with $(basename "$output_file")"$'\n'
@@ -372,6 +807,8 @@ if [ "$mode" = "e" ]; then
 		for ((counter=1; counter<=iterations; counter++))
 		do
 				var=$(encode_base64 "$var")
+
+				trace_log "Iteration $counter: Applied Base64 encoding."
 
 				if (( counter % 2 == 1 )); then
 						strlen=${#var}
@@ -389,9 +826,13 @@ if [ "$mode" = "e" ]; then
 
 						var=$(rotate_left "$var" "$rotation")
 						plain_key_data+="${counter}|rotate|${rotation}"$'\n'
+
+						trace_log "Iteration $counter: Applied rotate-left by $rotation."
 				else
 						var=$(reverse_string "$var")
 						plain_key_data+="${counter}|reverse|0"$'\n'
+
+						trace_log "Iteration $counter: Applied string reversal."
 				fi
 		done
 
@@ -407,11 +848,10 @@ if [ "$mode" = "e" ]; then
 				exit 1
 		fi
 
-		echo
-		echo "Encoding complete."
-		echo "Payload saved to: $output_file"
-		echo "Encrypted key saved to: $key_file"
-		exit 0
+		log ""
+		log "Encoding complete"
+		log "Payload saved to: $output_file"
+		log "Encrypted key saved to: $key_file"
 fi
 
 # ------------
@@ -419,26 +859,23 @@ fi
 # ------------
 
 if [ "$mode" = "d" ]; then
-		echo
-		echo "Tip: payload and key files are usually paired like:"
-		echo "  job_YYYYMMDD_HHMMSS_payload.txt"
-		echo "  job_YYYYMMDD_HHMMSS_key.txt"
-		
-		echo
-		echo "Available files in $RESULTS_DIR:"
-		ls -1 "$RESULTS_DIR"
-		echo
+		if [[ -z "$key_file" ]]; then
+			echo
+			echo "Tip: payload and key files are usually paired like:"
+			echo " job_YYYYMMDD_HHMMSS_payload.txt"
+			echo " job_YYYYMMDD_HHMMSS_key.txt"
+			echo
+			echo "Available files in $RESULTS_DIR:"
+			ls -1 "$RESULTS_DIR" 2>/dev/null || true
+			echo
 
-		read -r -p "Enter the encrypted key file name: " key_file
-        key_file=$(resolve_path "$key_file")
+			read -r -p "Enter the encrypted key file name: " key_file
+		fi
 
-        if [ -z "$key_file" ] || [ ! -f "$key_file" ]; then
-                echo "Key file not found!"
-                exit 1
-        fi
+		key_file=$(resolve_path "$key_file")
+		[[ -n "$key_file" && -f "$key_file" ]] || die "Key file not found"
 
-		read -r -s -p "Enter the password for the key file: " key_password
-		echo
+		key_password=$(prompt_for_existing_password)
 
 		plain_key_data=$(read_protected_keyfile "$key_file" "$key_password")
 		if [ $? -ne 0 ]; then
@@ -465,6 +902,7 @@ if [ "$mode" = "d" ]; then
 		fi
 
 # Replay the operations in reverse order to decode the payload
+
 		for ((idx=${#key_lines[@]}-1; idx>=0; idx--))
 		do
 				IFS='|' read -r iteration operation amount <<< "${key_lines[idx]}"
@@ -485,9 +923,13 @@ if [ "$mode" = "d" ]; then
 				fi
 
 				var="$decoded"
+
+				trace_log "Replaying iteration $iteration in reverse: $operation $amount"
 		done
 
-		read -r -p "Display decoded output in terminal? (y/n): " show_output
+		if [[ "$show_output" != "y" && "$INTERACTIVE" == true ]]; then
+			read -r -p $'\nDisplay decoded output in terminal? (y/n): ' show_output
+		fi
 
 		mkdir -p "$(dirname "$output_file")"
 		printf "%s" "$var" > "$output_file"

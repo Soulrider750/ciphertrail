@@ -1,6 +1,22 @@
 # CipherTrail
 
-CipherTrail is an educational Bash-based encoder and decoder tool used for cybersecurity scripting practice. It allows a user to encode direct input or file input through layered Base64 encoding, randomized string rotation, and string reversal operations. The tool also creates a paired protected key file that stores the decoding steps needed to reverse the process.
+CipherTrail is an educational command-line encoding and transformation lab written in Bash. It demonstrates layered Base64 encoding, reversible string transformations, protected key-file handling, and integrity checking while clearly showing the difference between encoding, obfuscation, and real encryption.
+
+## Important Security Notice
+
+CipherTrail is an educational security tool, not production encryption software. The payload output is obfuscated through reversible transformations, while the key recipe is password-protected. Do not use this project to protect real secrets, credentials, financial data, personal data, or production files.
+
+## What This Project Teaches
+
+CipherTrail is designed to demonstrate several cybersecurity and scripting concepts:
+
+- The difference between encoding, obfuscation, and encryption
+- How reversible transformations can be layered
+- How a transformation recipe can be stored separately from a payload
+- How password-protected metadata can support a decode workflow
+- How SHA-256 integrity checking can detect key recipe modification
+- How Bash scripts can handle input validation, file output, and CLI arguments
+- Why custom cryptographic systems should not be treated as a secure encryption
 
 ## Workflow Diagram
 
@@ -14,30 +30,39 @@ CipherTrail is not intended to replace modern encryption tools or production-gra
 
 ## Features
 
-- Encode direct user input or file input.
-- Decode previously encoded payloads.
-- Save encoded payloads to an output file. 
-- Generate a paired protected key file.
-- Protect key file contents using OpenSSL AES-256-CBC with PBKDF2
-- Verify protected key file integrity using SHA-256.
-- Apply layered Base64 encoding.
-- Apply randomized left rotation on odd-numbered iterations.
-- Apply string reversal on even-numbered iterations.
-- Replay operations in reverse order during decoding.
-- Support macOS and Linux environments
-- Store generated output files in a dedicated results directory.
-
-## Important Security Note
-
-CipherTrail is an educational encoding and obfuscation tool. While the key file is protected using OpenSSL and checked with SHA-256 integrity verification, the project should not be treated as a replacement for modern encryption standards, secure file encryption tools, or a professionally reviewed cryptographic software.
-
-For real-world encryption needs, use established tools and libraries that are actively maintained, peer reviewed, and designed for production security.
+- Interactive encode and decode workflow
+- Command-line encode and decode support
+- Layered Base64 encoding
+- Reversible string rotation and string reversal
+- Password-protected key file using OpenSSL
+- SHA-256 integrity check for decrypted key instructions
+- Direct text input or file-based input
+- Auto-generated payload and key files
+- `--help` usage menu
+- `--version` output
+- `explain` mode for educational descriptions
+- `--self-test` mode for built-in verification
+- `--verbose`, `--trace`, and `--quiet` output modes
 
 ## How It Works
 
 During encoding, CipherTrail repeatedly applies Base64 encoding to the input. On odd-numbered iterations, it also applies a randomized left rotation. On even-numbered iterations, it reverses the string. The tool records each transformation step in a key file.
 
 The key file is then protected with a user-created password. During decoding, CipherTrail decrypts the protected key file, verifies its SHA-256 hash, reads the stored transformation steps, and reverses the operations in the correct order to recover the original input.
+
+At a high level, CipherTrail works like this:
+
+```mermaid
+flowchart TD;
+    A[User provides text or file input] --> B[CipherTrail applies Base64 encoding]
+    B --> C[CipherTrail applies a reversible transformation]
+    C --> D[The operations is recorded in a key recipe]
+    D --> E[The final transformed output is saved as a payload file]
+    E --> F[The key recipe is hashed and password-protected]
+    F --> G[During decode, the key recipe is decrypted and verified]
+    G --> H[Transformations are played in reverse]
+    H --> I[Original input is recovered]
+```
 
 ## Requirements
 
@@ -67,68 +92,160 @@ chmod +x ciphertrail.sh
 
 ## Usage
 
-Run the script:
+CipherTrail can be used in two ways:
+
+1. Interactive mode
+2. Command-line mode
+
+### Interactive Mode
+
+Run the script without arguments:
 
 ```bash
 ./ciphertrail.sh
 ```
 
-CipherTrail will ask whether you want to encode or decode:
+### Command-line Mode
+
+Run CipherTrail with an explicit command:
 
 ```bash
-Would you like to encode or decode? (e/d):
+./ciphertrail.sh encode [options]
+./ciphertrail.sh decode [options]
 ```
-
-It will then ask whether you want to use direct input or read from a file:
+View all available options:
 
 ```bash
-Would you like to use direct input or read from a file? (i/f):
+./ciphertrail.sh --help
 ```
 
-## Encoding Example
+Check the installed version:
+
+```bash
+./ciphertrail.sh --version
+```
+### Explain Mode
+
+CipherTrail includes an educational explanation mode:
+
+```bash
+./ciphertrail.sh explain
+```
+This mode explains:
+- Base64 encoding
+- String rotation
+- String reversal
+- Protected key files
+- SHA-256 integrity checking
+- Why CipherTrail is not production encryption
+
+### Output Modes
+
+CipherTrail supports different output levels:
+
+| Option | Purpose|
+|----|----|
+| `--quiet` | Suppresses normal output. Useful for tests and automation. |
+| `--verbose` | Shows high-level process messages. |
+| `--trace` | Shows detailed transformation steps for educational walkthroughs. |
+
+Eaxample:
+
+```bash
+./ciphertrail.sh encode \
+  --input examples/sample_input.txt \
+  --iterations 3 \
+  --max-rotation 5 \
+  -trace
+  ```
+
+### Self-Test
+
+CipherTrail includes a built-in self-test that performs an encode/decode round trip and verifies that the decoded output matches the original input.
 
 Run:
 
 ```bash
-./ciphertrail.sh
+./ciphertrail.sh --self-test
 ```
-
-Choose:
+Expected Result:
 
 ```bash
-e
+Running CipherTrail self-test...
+Self-test passed.
 ```
 
-Then choose either direct input or file input.
+## Encoding Examples
 
-The tool will ask how many times you want to encode the input, the maximum random rotation amount, and the password used to protect the key file.
-
-After encoding, CipherTrail saves two files:
+### Encode a File
 
 ```bash
-job_YYYYMMDD_HHMMSS_payload.txt
-job_YYYYMMDD_HHMMSS_key.txt
+./ciphertrail.sh encode \
+  --input examples/sample_input.txt \
+  --iterations 5 \
+  --max-rotation 8 \
+  --verbose
 ```
 
-The payload file contains the encoded input. The key file contains the protected decoding instructions.
-
-## Decoding example
-
-Run:
+### Encode Direct Text
 
 ```bash
-./ciphertrail.sh
+./ciphertrail.sh encode \
+  --text "This is a CipherTrail test message." \
+  --iterations 3 \
+  --max-rotation 5
 ```
 
-Choose:
+### Encode With Explicit Output Files
 
 ```bash
-d
+./ciphertrail.sh encode \
+  --input examples/sample_input.txt \
+  --output encoder_results/demo_payload.txt \
+  --key encoder_results/demo_key.txt \
+  --iterations 5 \
+  --max-rotation 8
+  ```
+
+## Decoding Examples
+
+### Decode a Payload File
+
+```bash
+./ciphertrail.sh decode \
+  --input encoder_results/demo_payload.txt \
+  --key encoder_results/demo_key.txt \
+  --output encoder_results/demo_decoded.txt
+  ```
+
+### Decode and Display Output in the Terminal
+
+```bash
+./ciphertrail.sh decode \
+  --input encoder_results/demo_payload.txt \
+  --key encoder_results/demo_key.txt \
+  --output encoder_results/demo_decoded.txt \
+  --show
+  ```
+
+## Password Environment Variable Support
+
+For testing and automation, CipherTrail can read the key-file password from an environment variable.
+
+```bash
+export CIPHERTRAIL_PASSWORD="StrongTestPassword123!"
+
+./ciphertrail.sh encode \
+  --input examples/sample_input.txt \
+  --iterations 3 \
+  --max-rotation 5 \
+  --pasword-env CIPHERTRAIL_PASSWORD
+
+./ciphertrail.sh decode \
+  --input encoder_results/demo_payload.txt \
+  --key encoder_results/demo_key.txt \
+  --pasword-env CIPHERTRAIL_PASSWORD
 ```
-
-Select the encoded payload input, then provide the matching key file and password.
-
-If the password is correct and the key file passes the SHA-256 integrity check, CipherTrail reverses the recorded operations and saves the decoded output.
 
 ## Example File
 
@@ -143,13 +260,14 @@ You can use this file to test CipherTrail without creating your own input file f
 ## Project Structure
 
 ```bash
-ciphertrail/
+├── assets
+│   └── CyberTrail_Workflow.png
+├── backups
 ├── ciphertrail.sh
-├── README.md
+├── examples
+│   └── sample_input.txt
 ├── LICENSE
-├── .gitignore
-└── examples/
-    └── sample_input.txt
+└── README.md
 ```
 
 ## Skills Demonstrated
@@ -170,6 +288,18 @@ This project demonstrates:
 ## Disclaimer
 
 CipherTrail is for educational and portfolio use only. Do not use this tool to protect sensitive production data. The project is designed to demonstrate scripting, encoding workflows, and security concepts in a beginner-to-intermediate cybersecurity context.
+
+## Roadmap
+
+### Completed in v1.1
+
+- Added command-line encode/decode support
+- Added `--help` and `--version`
+- Added `explain` mode
+- Added `--self-test`
+- Added `--verbose`, `--trace`, and `--quiet`
+- Added password environment variable support
+- Preserved interactive mode
 
 ## Author
 
