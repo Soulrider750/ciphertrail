@@ -43,6 +43,11 @@ CipherTrail is not intended to replace modern encryption tools or production-gra
 - `explain` mode for educational descriptions
 - `--self-test` mode for built-in verification
 - `--verbose`, `--trace`, and `--quiet` output modes
+- Safer protected key-file metadata parsing
+- Payload SHA-256 fingerprinting
+- Clear errors for malformed or unsupported key files
+- Payload/key matching during decode
+- Explicit OpenSSL key-file protection settings
 
 ## How It Works
 
@@ -54,15 +59,104 @@ At a high level, CipherTrail works like this:
 
 ```mermaid
 flowchart TD;
-    A[User provides text or file input] --> B[CipherTrail applies Base64 encoding]
-    B --> C[CipherTrail applies a reversible transformation]
-    C --> D[The operations is recorded in a key recipe]
-    D --> E[The final transformed output is saved as a payload file]
-    E --> F[The key recipe is hashed and password-protected]
-    F --> G[During decode, the key recipe is decrypted and verified]
-    G --> H[Transformations are played in reverse]
-    H --> I[Original input is recovered]
+    A[User provides input] --> B[Base64 encode layer]
+    B --> C[Apply reversible transformation]
+    C --> D[Record operation in key recipe]
+    D --> E{More iterations}
+    E -->|Yes| B
+    E -->|No| F[Write payload file]
+    F --> G[Calculate payload SHA-256]
+    G --> H[Add payload hash to key recipe metadata]
+    H --> I[Hash key recipe]
+    I --> J[Password-protect key recipe with OpenSSL]
+    J --> K[Write protected key file]
+
+    L[Decode mode loads payload] --> M[Decrypt protected key file]
+    M --> N[Verify key recipe hash]
+    N --> O[Compare payload hash]
+    O --> P{Payload matches key?}
+    P -->|Yes| Q[Replay operations in reverse]
+    P -->|No| R[Stop with mismatch error]
+    Q --> S[Recovered original input]
 ```
+## Key File Protection
+
+CipherTrail separates the final transformed payload from the recipe needed to reverse it.
+
+The payload file contains the obfuscated output. The protected key file contains the transformation instructions needed to decode that payload.
+
+The protected key file uses OpenSSL password-based encryption for the key recipe. The script uses:
+
+- AES-256-CBC for key recipe protection
+- PBKDF2 for password-based key derivation
+- Salted encryption
+- SHA-256 as the digest setting
+- A configurable PBKDF2 iteration count
+
+By default, CipherTrail uses a stronger explicit PBKDF2 iteration setting instead of relying only on OpenSSL defaults.
+
+> Important: This protects the key recipe, not the payload itself. The payload should still be treated as obfuscated data, not securely encrypted data.
+
+## Payload and Key Matching
+
+CipherTrail can store a SHA-256 hash of the generated payload inside the protected key metadata.
+
+During decode, CipherTrail checks whether the selected payload matches the hash stored in the protected key file. This helps detect two common problems:
+
+1. The wrong key file was selected for a payload.
+2. The payload file was modified after it was created
+
+If the selected payload does not match the protected key metadata, CipherTrail stops before attempting to decode. 
+
+Example error:
+
+```text
+ERROR: This key file does not match the selected payload, or the payload was modified.
+```
+## Protected Key File Format
+
+The protected key file stores metadata and an encrypted payload containing the transformation recipe.
+
+Example Structure:
+
+```text
+# encoder key file
+FORMAT_VERSION=3
+PROTECTION=OPENSSL_AES_256_CBC_PBKDF2
+HASH_ALGO=SHA256
+HASH=<sha256 hash of decrypted key recipe>
+PAYLOAD=<encrypted key recipe>
+```
+The decrypted key recipe contains information similar to:
+
+```text
+# paired with payload.txt
+# payload_sha256=<sha256 hash of payload file>
+# format: iteration|operation|amount
+1|rotate|4
+2|reverse|0
+3|rotate|2
+```
+
+The operation lines tell CipherTrail how to reverse the payload transformations during decode.
+## Validation and Error Handling
+
+CipherTrail performs validation before and during encode/decode operations.
+
+Examples of validation checks include:
+
+- Missing input file
+- Empty input
+- Invalid iteration count
+- Invalid rotation value
+- Missing key file
+- Wrong key-file password
+- Malformed key-file metadata
+- Unsupported key-file format version
+- Payload/key mismatch
+- Failed Base64 decoding during reverse replay
+
+The goal is to fail safely and clearly instead of producing confusing or incomplete output.
 
 ## Requirements
 
@@ -149,14 +243,14 @@ CipherTrail supports different output levels:
 | `--verbose` | Shows high-level process messages. |
 | `--trace` | Shows detailed transformation steps for educational walkthroughs. |
 
-Eaxample:
+Example:
 
 ```bash
 ./ciphertrail.sh encode \
   --input examples/sample_input.txt \
   --iterations 3 \
   --max-rotation 5 \
-  -trace
+  --trace
   ```
 
 ### Self-Test
@@ -239,12 +333,12 @@ export CIPHERTRAIL_PASSWORD="StrongTestPassword123!"
   --input examples/sample_input.txt \
   --iterations 3 \
   --max-rotation 5 \
-  --pasword-env CIPHERTRAIL_PASSWORD
+  --password-env CIPHERTRAIL_PASSWORD
 
 ./ciphertrail.sh decode \
   --input encoder_results/demo_payload.txt \
   --key encoder_results/demo_key.txt \
-  --pasword-env CIPHERTRAIL_PASSWORD
+  --password-env CIPHERTRAIL_PASSWORD
 ```
 
 ## Example File
@@ -256,6 +350,31 @@ examples/sample_input.txt
 ```
 
 You can use this file to test CipherTrail without creating your own input file first.
+
+## Troubleshooting
+
+### Wrong Password
+
+If the wrong password is entered, CipherTrail cannot decrypt the protected key recipe.
+
+Try again with the password used when the file was created.
+
+### Payload/key mismatch
+
+If you see:
+
+```text
+ERROR: This key file does not match the selected payload, or the payload was modified.
+```
+Check that:
+
+- You selected the matching payload and key file pair.
+- The payload file has not been edited.
+- You are not mixing files from different jobs.
+
+### Malformed key file
+
+If CipherTrail reports that the key file is missing fields such as HASH, PAYLOAD, or FORMAT_VERSION, the key file may be damaged or may not be a valid CipherTrail key file.
 
 ## Project Structure
 
@@ -300,6 +419,15 @@ CipherTrail is for educational and portfolio use only. Do not use this tool to p
 - Added `--verbose`, `--trace`, and `--quiet`
 - Added password environment variable support
 - Preserved interactive mode
+
+### Completed in v1.2
+
+- Added safer key-file metadata parsing
+- Added specific malformed key-file errors
+- Added payload SHA-256 fingerprinting
+- Added payload/key matching during decode
+- Made OpenSSL key-file protection settings more explicit
+- Improved reliability and troubleshooting documentation
 
 ## Author
 

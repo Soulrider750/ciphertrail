@@ -4,18 +4,30 @@
 # Author: Andrew Edwards 
 # Purpose: Cybersecurity scripting and encoding/decoding practice lab for students and professionals. Demonstrates encoding, obfuscation, and key file protection concepts.
 
+# Initialize the script
+
 set -euo pipefail
 IFS=$'\n\t'
+
+# Create the results directory if it doesn't exist
 
 RESULTS_DIR="$HOME/encoder_results"
 mkdir -p "$RESULTS_DIR"
 
+# OpenSSL configuration
+
+OPENSSL_CIPHER="aes-256-cbc"
+OPENSSL_KDF_ITERATIONS="${CIPHERTRAIL_KDF_ITERATIONS:-600000}"
+OPENSSL_DIGEST="sha256"
+
 # Create a unique job name based on timestamp to avoid overwriting results
+
 timestamp=$(date +"%Y%m%d_%H%M%S")
 job_name="job_${timestamp}"
 
 # Version information and script name for help and logging
-VERSION="1.1.0"
+
+VERSION="1.2.0"
 SCRIPT_NAME="$(basename "$0")"
 
 # Default behavior flags (can be overridden by CLI options)
@@ -100,8 +112,8 @@ Encode options:
     -o, --output FILE               Payload output file
     -k, --key FILE                  Key output file
     -n, --iterations NUM            Number of encoding layers, max $MAX_ITERATIONS
-    -r, --max-rotations NUM         Maximum rotation amount
-        --passwords-env VAR         Read key password from environment variable
+    -r, --max-rotation NUM         Maximum rotation amount
+        --password-env VAR          Read key password from environment variable
 
 Decode options:
     -i, --input FILE                Encoded payload file
@@ -275,6 +287,8 @@ get_password_from_env() {
 	return 1
 }
 
+# Prompt for a new password, either from the environment or interactively
+
 prompt_for_new_password() {
 	local password=""
 	local confirm=""
@@ -294,6 +308,8 @@ prompt_for_new_password() {
 
 	printf "%s" "$password"
 }
+
+# Prompt for an existing password, either from the environment or interactively
 
 prompt_for_existing_password() {
 	local password=""
@@ -466,6 +482,8 @@ run_self_test() {
 	rm -rf "$temp_dir"
 }
 
+# Resolve a path to an absolute path, handling tilde expansion and relative paths
+
 resolve_path() {
     local input="$1"
 
@@ -578,6 +596,24 @@ sha256_string() {
 		return 1
 }
 
+sha256_file() {
+	local file="$1"
+
+	[[ -f "$file" ]] || die "Cannot hash missing file: $file"
+
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$file" | awk '{print $1}'
+		return 0
+	fi
+
+	if command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$file" | awk '{print $1}'
+		return 0
+	fi
+
+	die "No SHA-256 tool found (need sha256sum or shasum)."
+}
+
 check_openssl() {
 		if ! command -v openssl >/dev/null 2>&1; then
 				echo "OpenSSL is required but not installed." >&2
@@ -620,7 +656,7 @@ encrypt_with_password() {
 	err_file=$(mktemp) || return 1
 
 	if ! output=$(printf "%s" "$plaintext" | \
-		openssl enc -aes-256-cbc -pbkdf2 -salt -a -A -pass fd:3 3<<<"$password" 2>"$err_file"); then
+		openssl enc "-$OPENSSL_CIPHER" -pbkdf2 -iter "$OPENSSL_KDF_ITERATIONS" -md "$OPENSSL_DIGEST" -salt -a -A -pass fd:3 3<<<"$password" 2>"$err_file"); then
 		echo "ERROR: OpenSSL encryption failed" >&2
 		cat "$err_file" >&2
 		rm -f "$err_file"
@@ -639,7 +675,7 @@ decrypt_with_password() {
 	err_file=$(mktemp) || return 1
 
 	if ! output=$(printf "%s" "$ciphertext" | \
-		openssl enc -aes-256-cbc -pbkdf2 -d -a -A -pass fd:3 3<<<"$password" 2>"$err_file"); then
+		openssl enc "-$OPENSSL_CIPHER" -pbkdf2 -iter "$OPENSSL_KDF_ITERATIONS" -md "$OPENSSL_DIGEST" -d -a -A -pass fd:3 3<<<"$password" 2>"$err_file"); then
 		echo "ERROR: OpenSSL decryption failed" >&2
 		cat "$err_file" >&2
 		rm -f "$err_file"
@@ -674,7 +710,7 @@ write_protected_keyfile() {
 
 		{
 				echo "# encoder key file"
-				echo "FORMAT_VERSION=2"
+				echo "FORMAT_VERSION=3"
 				echo "PROTECTION=OPENSSL_AES_256_CBC_PBKDF2"
 				echo "HASH_ALGO=SHA256"
 				echo "HASH=$key_hash"
@@ -685,7 +721,24 @@ write_protected_keyfile() {
 		}
 }
 
+# Extract a specific field from the key file
+
+get_key_field() {
+	local field_name="$1"
+	local key_file="$2"
+
+	awk -F'=' -v field="$field_name" '
+	  $1 == field {
+	    sub(/^[^=]*=/, "")
+	    print
+	    exit
+	  }
+	' "$key_file"
+}
+
+
 # Read protected key file, decrypt payload, verify hash, output plain key data
+
 read_protected_keyfile() {
 		local key_file="$1"
 		local password="$2"
@@ -700,8 +753,35 @@ read_protected_keyfile() {
 		local decrypted_payload
 		local computed_hash
 
-		stored_hash=$(grep '^HASH=' "$key_file" | head -n1 | cut -d'=' -f2-)
-		payload=$(grep '^PAYLOAD=' "$key_file" | head -n1| cut -d'=' -f2-)
+		stored_hash=$(get_key_field "HASH" "$key_file")
+		payload=$(get_key_field "PAYLOAD" "$key_file")
+		format_version=$(get_key_field "FORMAT_VERSION" "$key_file")
+		protection=$(get_key_field "PROTECTION" "$key_file")
+
+		if [[ -z "$format_version" ]]; then
+		  echo "Key file is missing FORMAT_VERSION." >&2
+		  return 1
+		fi
+
+		if [[ "$format_version" != "2" && "$format_version" != "3" ]]; then
+		  echo "Unsupported key file format version: $format_version" >&2
+		  return 1
+		fi
+
+		if [[ -z "$protection" ]]; then
+		  echo "Key file is missing PROTECTION metadata." >&2
+		  return 1
+		fi
+
+		if [[ -z "$stored_hash" ]]; then
+		  echo "Key file is missing HASH field." >&2
+		  return 1
+		fi
+
+		if [[ -z "$payload" ]]; then
+		  echo "Key file is missing PAYLOAD field." >&2
+		  return 1
+		fi
 
 		if [ -z "$stored_hash" ] || [ -z "$payload" ]; then
 				echo "Key file is missing HASH or PAYLOAD fields!" >&2
@@ -800,9 +880,7 @@ if [ "$mode" = "e" ]; then
 			key_file="$RESULTS_DIR/${job_name}_key.txt"
 		fi
 
-        plain_key_data=""
-        plain_key_data+="# paired with $(basename "$output_file")"$'\n'
-        plain_key_data+="# format: iteration|operation|amount"$'\n'
+        operation_data=""
 
 		for ((counter=1; counter<=iterations; counter++))
 		do
@@ -825,21 +903,29 @@ if [ "$mode" = "e" ]; then
 						fi
 
 						var=$(rotate_left "$var" "$rotation")
-						plain_key_data+="${counter}|rotate|${rotation}"$'\n'
+						operation_data+="${counter}|rotate|${rotation}"$'\n'
 
 						trace_log "Iteration $counter: Applied rotate-left by $rotation."
 				else
 						var=$(reverse_string "$var")
-						plain_key_data+="${counter}|reverse|0"$'\n'
+						operation_data+="${counter}|reverse|0"$'\n'
 
 						trace_log "Iteration $counter: Applied string reversal."
 				fi
 		done
 
-		plain_key_data="${plain_key_data%$'\n'}"
+		operation_data="${operation_data%$'\n'}"
 
         mkdir -p "$(dirname "$output_file")"
 		printf "%s" "$var" >"$output_file"
+
+		payload_hash=$(sha256_file "$output_file")
+
+		plain_key_data=""
+		plain_key_data+="# paired with $(basename "$output_file")"$'\n'
+		plain_key_data+="# payload_sha256=$payload_hash"$'\n'
+		plain_key_data+="# format: iteration|operation|amount"$'\n'
+		plain_key_data+="$operation_data"
 
         mkdir -p "$(dirname "$key_file")"
 		write_protected_keyfile "$plain_key_data" "$key_file" "$key_password"
@@ -877,9 +963,22 @@ if [ "$mode" = "d" ]; then
 
 		key_password=$(prompt_for_existing_password)
 
-		plain_key_data=$(read_protected_keyfile "$key_file" "$key_password")
-		if [ $? -ne 0 ]; then
-				exit 1
+		if ! plain_key_data=$(read_protected_keyfile "$key_file" "$key_password"); then
+             die "Unable to unlock or verify the protected key file. Decode aborted."
+        fi
+
+		expected_payload_hash=$(printf "%s" "$plain_key_data" | awk -F'=' '/^# payload_sha256=/ {print $2; exit}')
+
+		if [[ -n "$expected_payload_hash" ]]; then
+		  actual_payload_hash=$(sha256_string "$var")
+
+		  if [[ "$expected_payload_hash" != "$actual_payload_hash" ]]; then
+		    die "This key file does not match the selected payload, or the payload has been modified."
+			fi
+
+			verbose_log "Payload hash matched protected key metadata."
+		else
+		    verbose_log "No payload hash found in key metadata. Skipping payload/key match check."
 		fi
 
 		key_base=$(basename "$key_file")
@@ -889,7 +988,9 @@ if [ "$mode" = "d" ]; then
 				job_base="decoded_${timestamp}"
 		fi
 
-		output_file="$RESULTS_DIR/${job_base}_decoded.txt"
+		if [[ -z "$output_file" ]]; then
+		  output_file="$RESULTS_DIR/${job_base}_decoded.txt"
+		fi
 
 		key_lines=()
 		while IFS= read -r line; do
