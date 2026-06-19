@@ -22,3 +22,6 @@ ciphertrail_results/
 
 #Backup files
 backups/*
+
+# Ignore local workplace settings
+.vscode/settings.json
